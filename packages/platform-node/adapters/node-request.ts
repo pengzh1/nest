@@ -801,10 +801,17 @@ function preferredRedirectType(
   }
   const ranges = accept.split(',').map((part, order) => {
     const [range, ...params] = part.trim().toLowerCase().split(';');
-    const qParam = params.find(param => param.trim().startsWith('q='));
-    const q = qParam ? Number(qParam.trim().slice(2)) : 1;
+    const pairs = params.map(param => param.trim().split('='));
+    const qIndex = pairs.findIndex(([key]) => key === 'q');
+    // As in Express (negotiator), a parameter other than `q` only matches a
+    // type that has it too, unless its value is `*` or empty; `text/plain`
+    // and `text/html` have no parameter
+    const matches = pairs
+      .slice(0, qIndex < 0 ? undefined : qIndex)
+      .every(([, value = '']) => /^\*?$/.test(value.replace(/^"(.*)"$/, '$1')));
+    const q = qIndex < 0 ? 1 : Number(pairs[qIndex][1]);
     const [type, subtype] = range.trim().split('/');
-    return { type, subtype, q: Number.isNaN(q) ? 0 : q, order };
+    return { type, subtype, matches, q: Number.isNaN(q) ? 0 : q, order };
   });
   const rank = (subtype: 'plain' | 'html') => {
     let best: { q: number; specificity: number; order: number } | undefined;
@@ -818,6 +825,7 @@ function preferredRedirectType(
               ? 0
               : -1;
       if (
+        range.matches &&
         specificity >= 0 &&
         (specificity > (best?.specificity ?? -1) ||
           (specificity === best?.specificity &&
